@@ -42,8 +42,8 @@ static constexpr module_info_t g_module_info = {
     .pkg_id = "eternal.future.texturepackextension", // 唯一包名
     .name = "TexturePackExtension", // 插件名称
     .author = "eternalfuture-e38299", // 作者
-    .version = "1.0.2", // 版本
-    .version_code = 3, // 版本代码
+    .version = "1.0.3", // 版本
+    .version_code = 4, // 版本代码
     .api_version = 1, // API版本
     .plugin_dependencies_sizes = 0, // 依赖插件数组大小（如需依赖请修改）
     .plugin_dependencies = nullptr, // 依赖插件列表
@@ -100,6 +100,11 @@ static TEFKernel::PatchLib::Field FSharedBatching;
 static TEFKernel::PatchLib::Field FNonSharedHeadInsert;
 
 static bool isUiTexture(const std::string& assetName) {
+    // 血条/资源条需要单独处理
+    if (assetName.find("PlayerResourceSets") != std::string::npos ||
+        assetName.find("HorizontalBars") != std::string::npos) {
+        return false;
+    }
     return assetName.find("/UI/") != std::string::npos ||
                              assetName.find("Inventory_Back") != std::string::npos ||
                              assetName.find("PanelBackground") != std::string::npos ||
@@ -112,7 +117,12 @@ static void fixUi(const std::string& assetName, patch_handle_t texture) {
     // UI 面板类纹理需 SharedBatching=0 + NonSharedHeadInsert=1（非共享分支头插，先画背景，
     // 避免尾插盖住上层文字/图标）。物品/方块/弹幕等世界内容 SharedBatching=1。
 
-    if (isUiTexture(assetName)) {
+    // 血条/资源条类纹理需要SharedBatching=1（共享批处理）
+    if (assetName.find("PlayerResourceSets") != std::string::npos ||
+        assetName.find("HorizontalBars") != std::string::npos) {
+        FSharedBatching.SetValue<bool>(texture, true);
+        LOGD("LoadTexture2D: health bar texture, SharedBatching=1 for %s", assetName.c_str());
+    } else if (isUiTexture(assetName)) {
         FSharedBatching.SetValue<bool>(texture, false);
         FNonSharedHeadInsert.SetValue<bool>(texture, true);
         LOGD("LoadTexture2D: UI texture, SharedBatching=0 NonShared=1 for %s", assetName.c_str());
