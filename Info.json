@@ -1,0 +1,32 @@
+{
+  "pkgId": "eternal.future.texturepackextension",
+  "name": "TexturePackExtension",
+  "author": "eternalfuture-e38299",
+  "description": "使游戏支持材质包",
+  "version": "2.0.0",
+  "versionCode": 5,
+  "detailedInformationURL": "",
+  "updateURL": "",
+  "dependence": [],
+  "support": {
+    "android": {
+      "arm64": true,
+      "arm": true
+    },
+    "windows": {
+      "x64": false,
+      "x86": false
+    },
+    "linux": {
+      "x64": false,
+      "x86": false
+    },
+    "mac": {
+      "x64": false,
+      "arm64": false
+    },
+    "ios": {
+      "arm64": false
+    }
+  }
+}

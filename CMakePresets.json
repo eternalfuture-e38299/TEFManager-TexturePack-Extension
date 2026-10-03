@@ -1,0 +1,73 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base-android",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "ANDROID_MODE": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "/home/eternalfuture/Android/Sdk/ndk/28.0.13004108/build/cmake/android.toolchain.cmake"
+      }
+    },
+    {
+      "name": "android-arm64-debug",
+      "inherits": "base-android",
+      "displayName": "Android ARM64 Debug",
+      "description": "Build for Android ARM64 using NDK Clang - Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ANDROID_ABI": "arm64-v8a"
+      }
+    },
+    {
+      "name": "android-arm64-release",
+      "inherits": "base-android",
+      "displayName": "Android ARM64 Release",
+      "description": "Build for Android ARM64 using NDK Clang - Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ANDROID_ABI": "arm64-v8a"
+      }
+    },
+    {
+      "name": "android-arm32-debug",
+      "inherits": "base-android",
+      "displayName": "Android ARM32 Debug",
+      "description": "Build for Android ARM32 using NDK Clang - Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ANDROID_ABI": "armeabi-v7a"
+      }
+    },
+    {
+      "name": "android-arm32-release",
+      "inherits": "base-android",
+      "displayName": "Android ARM32 Release",
+      "description": "Build for Android ARM32 using NDK Clang - Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ANDROID_ABI": "armeabi-v7a"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "android-arm64-debug",
+      "configurePreset": "android-arm64-debug"
+    },
+    {
+      "name": "android-arm64-release",
+      "configurePreset": "android-arm64-release"
+    },
+    {
+      "name": "android-arm32-debug",
+      "configurePreset": "android-arm32-debug"
+    },
+    {
+      "name": "android-arm32-release",
+      "configurePreset": "android-arm32-release"
+    }
+  ]
+}
