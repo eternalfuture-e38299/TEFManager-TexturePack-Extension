@@ -56,9 +56,7 @@ public:
      */
     void LoadAllBlocking();
 
-    void *Get(const std::string &assetName,
-                const TEFKernel::PatchLib::Field &sharedBatching,
-                const TEFKernel::PatchLib::Field &nonSharedHeadInsert);
+    void *Get(const std::string &assetName);
 
     [[nodiscard]] size_t Count() const;
 

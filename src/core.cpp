@@ -43,8 +43,8 @@ static constexpr module_info_t g_module_info = {
     .pkg_id = "eternal.future.texturepackextension",
     .name = "TexturePackExtension",
     .author = "eternalfuture-e38299",
-    .version = "2.0.0",
-    .version_code = 6,
+    .version = "2.0.5",
+    .version_code = 11,
     .api_version = 1,
     .plugin_dependencies_sizes = 0,
     .plugin_dependencies = nullptr,
@@ -52,6 +52,8 @@ static constexpr module_info_t g_module_info = {
 
 static TEFKernel::PatchLib::Field FSharedBatching;
 static TEFKernel::PatchLib::Field FNonSharedHeadInsert;
+static TEFKernel::PatchLib::Field FBatchTextureIndex;
+static TEFKernel::PatchLib::Field FBatchTextureIndexPublic;
 
 // ------- JSON 加载 -------
 static bool load_json(const std::filesystem::path &path, std::vector<PackEntry> &output) {
@@ -132,6 +134,102 @@ static void build_global_index() {
     LOGI("Global index built: %zu entries", g_texture_indexes.size());
 }
 
+// ------- 替换纹理的批次/UI 字段配置 -------
+namespace {
+    std::string normalize_slashes(std::string s) {
+        for (char &c : s) {
+            if (c == '\\') c = '/';
+        }
+        return s;
+    }
+
+    bool looksLikeUi(const std::string &rawName) {
+        const std::string assetName = normalize_slashes(rawName);
+        static const char *kHints[] = {
+            "/UI/", "/Menu/", "/Map/", "/Backgrounds/", "/Interface/",
+            "/CharCreation/", "/WorldCreation/", "/PlayerSelect/",
+            "/Cursor/", "/Title/", "/Logo/", "/Splash/", "/Chat/",
+            "/Emote/", "/Minimap/", "Inventory_", "PanelBackground",
+            "Panel", "Button", "Scrollbar", "TextBox",
+        };
+        for (const char *hint : kHints) {
+            if (assetName.find(hint) != std::string::npos) return true;
+        }
+        return false;
+    }
+
+    bool isUiTexture(const std::string &rawName) {
+        const std::string assetName = normalize_slashes(rawName);
+        // Fancy 资源集是“底色块 + 覆盖心”交替绘制，必须保留绘制顺序，
+        // 否则底图会盖住后画的心，看起来只有第一颗亮。
+        if (assetName.find("PlayerResourceSets/Fancy") != std::string::npos) {
+            return true;
+        }
+        if (assetName.find("PlayerResourceSets") != std::string::npos ||
+            assetName.find("HorizontalBars") != std::string::npos) {
+            return false;
+        }
+        return looksLikeUi(assetName);
+    }
+
+    // 原版 Texture2D 加载时会调 RefreshBatchIndex()：
+    //   没有 atlas 的纹理 -> BatchTextureIndex = _batchTextureIndex
+    // 但 terraria_texture2d_create() 只调了构造函数，没有调 RefreshBatchIndex，
+    // 所以所有替换纹理的 BatchTextureIndex 都是 0，会被 SpriteBatcher 当成
+    // 同一个批次纹理合并，导致 Fancy 血条这种多纹理 UI 只剩第一张正确。
+    void fix_batch_index(patch_handle_t texture) {
+        if (!FBatchTextureIndex.IsValid() || !FBatchTextureIndexPublic.IsValid()) return;
+        const int idx = FBatchTextureIndex.GetValue<int>(texture);
+        FBatchTextureIndexPublic.SetValue<int>(texture, idx);
+    }
+}
+
+static bool is_heart_name(const std::string &assetName) {
+    return assetName.find("Heart") != std::string::npos ||
+           assetName.find("heart") != std::string::npos ||
+           assetName.find("Fancy") != std::string::npos ||
+           assetName.find("Bar") != std::string::npos;
+}
+
+static void configure_texture(const std::string &assetName, patch_handle_t texture) {
+    fix_batch_index(texture);
+
+    const std::string norm = normalize_slashes(assetName);
+    const bool isFancy = norm.find("PlayerResourceSets/Fancy") != std::string::npos;
+
+    if (!FSharedBatching.IsValid() || !FNonSharedHeadInsert.IsValid()) return;
+    if (isFancy) {
+        // Fancy 每颗心是「底图 + 覆盖填充」两次绘制。
+        // 底图用 head insert 插到批次链前面，填充用普通追加放到链尾，
+        // 最终链顺序就是「所有底图 -> 所有填充」，填充不会被后来的底图盖住。
+        const bool isFill = norm.find("/Heart_Fill") != std::string::npos ||
+                            norm.find("/Star_Fill") != std::string::npos;
+        FSharedBatching.SetValue<bool>(texture, isFill);
+        FNonSharedHeadInsert.SetValue<bool>(texture, !isFill);
+    } else if (norm.find("PlayerResourceSets") != std::string::npos ||
+               norm.find("HorizontalBars") != std::string::npos) {
+        FSharedBatching.SetValue<bool>(texture, true);
+    } else if (isUiTexture(assetName)) {
+        FSharedBatching.SetValue<bool>(texture, false);
+        FNonSharedHeadInsert.SetValue<bool>(texture, true);
+    } else {
+        if (looksLikeUi(assetName)) {
+            LOGW("possible UI texture not classified as UI: %s", assetName.c_str());
+        }
+        FSharedBatching.SetValue<bool>(texture, true);
+    }
+
+    if (is_heart_name(assetName) && FBatchTextureIndex.IsValid() &&
+        FBatchTextureIndexPublic.IsValid()) {
+        LOGI("[heart] name=%s batch=%d _batch=%d shared=%d head=%d",
+             assetName.c_str(),
+             FBatchTextureIndexPublic.GetValue<int>(texture),
+             FBatchTextureIndex.GetValue<int>(texture),
+             FSharedBatching.GetValue<bool>(texture),
+             FNonSharedHeadInsert.GetValue<bool>(texture));
+    }
+}
+
 // ------- LoadTexture2D hook：只剩一次哈希查找 -------
 static bool LoadTexture2D_Prefix(patch_handle_t instance, void **args,
                                  const patch_method_signature_t *sig_info, void *result) {
@@ -140,8 +238,8 @@ static bool LoadTexture2D_Prefix(patch_handle_t instance, void **args,
     const auto assetName = TEFKernel::PatchLib::Struct::String(
         *static_cast<patch_handle_t *>(args[0]), false).ToString();
 
-    if (void *tex = TextureManager::Instance().Get(
-        assetName, FSharedBatching, FNonSharedHeadInsert)) {
+    if (void *tex = TextureManager::Instance().Get(assetName)) {
+        configure_texture(assetName, static_cast<patch_handle_t>(tex));
         *static_cast<patch_handle_t *>(result) = tex;
         return true;
     }
@@ -151,6 +249,8 @@ static bool LoadTexture2D_Prefix(patch_handle_t instance, void **args,
 // ------- 初始化：全部阻塞到底 -------
 static bool init_module(module_entry_t *entry) {
     const auto t0 = std::chrono::steady_clock::now();
+    LOGI("TexturePackExtension %s (versionCode %d) loaded",
+         g_module_info.version, g_module_info.version_code);
 
     // 加载 config
     std::vector<PackEntry> pack_entries;
@@ -173,6 +273,8 @@ static bool init_module(module_entry_t *entry) {
         "Microsoft.Xna.Framework.Graphics", "Texture2D");
     FSharedBatching = Texture2d.GetField("SharedBatching");
     FNonSharedHeadInsert = Texture2d.GetField("NonSharedHeadInsert");
+    FBatchTextureIndex = Texture2d.GetField("_batchTextureIndex");
+    FBatchTextureIndexPublic = Texture2d.GetField("BatchTextureIndex");
 
     // 安装 hook
     const TEFKernel::PatchLib::Type ContentManager(
