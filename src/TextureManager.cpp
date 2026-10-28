@@ -34,31 +34,6 @@
 namespace {
     constexpr size_t kThreads = 16;
 
-    bool isUiTexture(const std::string &assetName) {
-        if (assetName.find("PlayerResourceSets") != std::string::npos ||
-            assetName.find("HorizontalBars") != std::string::npos) {
-            return false;
-        }
-        return assetName.find("/UI/") != std::string::npos ||
-               assetName.find("Inventory_Back") != std::string::npos ||
-               assetName.find("PanelBackground") != std::string::npos ||
-               assetName.find("/CharCreation/") != std::string::npos ||
-               assetName.find("/WorldCreation/") != std::string::npos;
-    }
-
-    void fixUi(const std::string &assetName, patch_handle_t texture,
-               const TEFKernel::PatchLib::Field &sharedBatching,
-               const TEFKernel::PatchLib::Field &nonSharedHeadInsert) {
-        if (assetName.find("PlayerResourceSets") != std::string::npos ||
-            assetName.find("HorizontalBars") != std::string::npos) {
-            sharedBatching.SetValue<bool>(texture, true);
-        } else if (isUiTexture(assetName)) {
-            sharedBatching.SetValue<bool>(texture, false);
-            nonSharedHeadInsert.SetValue<bool>(texture, true);
-        } else {
-            sharedBatching.SetValue<bool>(texture, true);
-        }
-    }
 }
 
 TextureManager &TextureManager::Instance() {
@@ -94,6 +69,7 @@ void TextureManager::LoadAllBlocking() {
 
     struct Slot {
         std::string assetName;
+        size_t size = 0;
         DecodedTexture decoded;
     };
     std::vector<Slot> slots(tasks.size());
@@ -105,6 +81,7 @@ void TextureManager::LoadAllBlocking() {
         auto &slot = slots[i];
         futures.push_back(pool.Enqueue([&task, &slot] {
             slot.assetName = task.assetName;
+            slot.size = task.size;
 
             int w = 0, h = 0, ch = 0;
             stbi_set_flip_vertically_on_load(true);
@@ -125,11 +102,12 @@ void TextureManager::LoadAllBlocking() {
     // 汇总到 _decoded（此时无竞争，单线程写）
     size_t ok = 0, fail = 0;
     _decoded.reserve(tasks.size());
-    for (auto &[assetName, decoded]: slots) {
-        if (!decoded.pixels.empty()) {
-            _decoded[std::move(assetName)] = std::move(decoded);
+    for (auto &slot: slots) {
+        if (!slot.decoded.pixels.empty()) {
+            _decoded[std::move(slot.assetName)] = std::move(slot.decoded);
             ++ok;
         } else {
+            LOGW("decode failed: %s (%zu bytes)", slot.assetName.c_str(), slot.size);
             ++fail;
         }
     }
@@ -140,9 +118,7 @@ void TextureManager::LoadAllBlocking() {
          std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
 }
 
-void *TextureManager::Get(const std::string &assetName,
-                          const TEFKernel::PatchLib::Field &sharedBatching,
-                          const TEFKernel::PatchLib::Field &nonSharedHeadInsert) {
+void *TextureManager::Get(const std::string &assetName) {
     std::lock_guard lock(_texMutex);
 
     // 命中缓存
@@ -166,9 +142,6 @@ void *TextureManager::Get(const std::string &assetName,
         LOGE("Create Texture2D failed: %s", assetName.c_str());
         return nullptr;
     }
-
-    // 设置 UI 相关字段
-    fixUi(assetName, tex, sharedBatching, nonSharedHeadInsert);
 
     // 缓存 + 释放像素内存
     _textures[assetName] = tex;
